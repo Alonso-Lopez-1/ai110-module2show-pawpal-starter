@@ -6,6 +6,10 @@
 
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
+Three core actions that should be available to the user are:
+- Add a pet to the system
+- Create a task for a pet
+- Generate the schedule for a pet
 
 **b. Design changes**
 
