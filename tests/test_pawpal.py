@@ -288,3 +288,122 @@ def test_future_due_date_excluded_from_todays_schedule():
     result = scheduler.generate_schedule()
 
     assert len(result) == 0, "Task due tomorrow should not be scheduled today"
+
+
+# ------------------------------------------------------------------
+# Chronological sort tests  (Step 2 requirement)
+# ------------------------------------------------------------------
+
+def test_sort_by_time_returns_chronological_order():
+    """Sorting: sort_by_time() should return schedule details in ascending start-time order."""
+    owner = Owner("Test", [(600, 1200)])
+    pet = Pet(name="Buddy", species="dog", age=2)
+    owner.add_pet(pet)
+    walk = Task(title="Walk",    duration_minutes=30, priority="high")
+    feed = Task(title="Feeding", duration_minutes=20, priority="medium")
+    play = Task(title="Play",    duration_minutes=15, priority="low")
+    pet.add_task(walk)
+    pet.add_task(feed)
+    pet.add_task(play)
+
+    scheduler = Scheduler(owner)
+    scheduler.generate_schedule()
+    sorted_details = scheduler.sort_by_time()
+
+    start_times = [start for _, _, start, _ in sorted_details]
+    assert start_times == sorted(start_times), \
+        "sort_by_time() should return tasks in ascending start-time order"
+
+
+def test_sort_by_time_with_manually_reversed_details():
+    """Sorting: sort_by_time() must sort even when schedule_details are in reverse order."""
+    owner = Owner("Test", [(600, 1200)])
+    pet = Pet(name="Rex", species="dog", age=3)
+    owner.add_pet(pet)
+    task_a = Task(title="Task A", duration_minutes=30, priority="high")
+    task_b = Task(title="Task B", duration_minutes=20, priority="medium")
+    task_c = Task(title="Task C", duration_minutes=10, priority="low")
+    pet.add_task(task_a)
+    pet.add_task(task_b)
+    pet.add_task(task_c)
+
+    scheduler = Scheduler(owner)
+    # Inject details in reverse chronological order to confirm sort_by_time fixes it
+    scheduler.last_schedule = [task_c, task_b, task_a]
+    scheduler.last_schedule_details = [
+        (pet, task_c, 500, True),  # latest start
+        (pet, task_b, 400, True),
+        (pet, task_a, 360, True),  # earliest start
+    ]
+    scheduler._unscheduled = []
+
+    sorted_details = scheduler.sort_by_time()
+    start_times = [start for _, _, start, _ in sorted_details]
+    assert start_times == [360, 400, 500], \
+        "sort_by_time() should reorder reversed details into ascending start-time order"
+
+
+def test_sort_by_time_across_two_windows():
+    """Sorting: sort_by_time() should interleave tasks from multiple windows correctly."""
+    # Window 1: 6–7 AM, Window 2: 1–3 PM
+    owner = Owner("Test", [(600, 700), (1300, 1500)])
+    pet = Pet(name="Milo", species="cat", age=1)
+    owner.add_pet(pet)
+    # Three tasks that will fill both windows
+    t1 = Task(title="Morning Feed", duration_minutes=30, priority="high",   preferred_time="morning")
+    t2 = Task(title="Afternoon Walk", duration_minutes=30, priority="medium", preferred_time="afternoon")
+    t3 = Task(title="Afternoon Play", duration_minutes=30, priority="low",   preferred_time="afternoon")
+    pet.add_task(t1)
+    pet.add_task(t2)
+    pet.add_task(t3)
+
+    scheduler = Scheduler(owner)
+    scheduler.generate_schedule()
+    sorted_details = scheduler.sort_by_time()
+
+    start_times = [start for _, _, start, _ in sorted_details]
+    assert start_times == sorted(start_times), \
+        "sort_by_time() should return tasks from all windows in chronological order"
+
+
+# ------------------------------------------------------------------
+# Edge case tests  (Step 2 additions)
+# ------------------------------------------------------------------
+
+def test_pet_with_no_tasks_produces_empty_schedule():
+    """Edge case: a pet with no tasks should result in an empty schedule."""
+    owner = Owner("Alex", [(600, 800)])
+    pet = Pet(name="Ghost", species="cat", age=4)
+    owner.add_pet(pet)  # no tasks added
+
+    scheduler = Scheduler(owner)
+    result = scheduler.generate_schedule()
+    assert result == [], "A pet with no tasks should yield an empty schedule"
+
+
+def test_add_task_with_invalid_priority_raises():
+    """Edge case: add_task() should reject an unrecognized priority string."""
+    import pytest
+    pet = Pet(name="Buddy", species="dog", age=2)
+    bad_task = Task(title="Walk", duration_minutes=30, priority="urgent")
+    with pytest.raises(ValueError, match="priority"):
+        pet.add_task(bad_task)
+
+
+def test_add_task_with_empty_title_raises():
+    """Edge case: add_task() should reject a task whose title is blank or whitespace."""
+    import pytest
+    pet = Pet(name="Buddy", species="dog", age=2)
+    blank_task = Task(title="   ", duration_minutes=10, priority="low")
+    with pytest.raises(ValueError, match="[Tt]itle"):
+        pet.add_task(blank_task)
+
+
+def test_task_fits_exactly_in_remaining_window():
+    """Edge case: a task whose duration exactly equals the window size should be scheduled."""
+    # Window is exactly 30 minutes; task is exactly 30 minutes
+    task = Task(title="Exact Fit", duration_minutes=30, priority="high")
+    scheduler = _make_scheduler([(600, 630)], [task])
+    result = scheduler.generate_schedule()
+    assert len(result) == 1, "A task that fits exactly in the window should be scheduled"
+    assert result[0].title == "Exact Fit"
