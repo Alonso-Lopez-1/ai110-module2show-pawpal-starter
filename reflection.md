@@ -28,11 +28,13 @@ added some checks for the scheduling so that there were no overlapping time wind
 
 - What constraints does your scheduler consider (for example: time, priority, preferences)?
 - How did you decide which constraints mattered most?
+The scheduler considers available time windows (tasks must fit within the owner's free blocks) and task priority (high-priority tasks are placed before medium and low). Priority was treated as the most critical constraint because missing a high-urgency task causes the most harm, while time-of-day preference is a softer constraint handled as a best-effort fallback.
 
 **b. Tradeoffs**
 
 - Describe one tradeoff your scheduler makes.
 - Why is that tradeoff reasonable for this scenario?
+The scheduler uses a two-pass linear scan over time windows for each task — first seeking a preferred-time match, then falling back to any available window. This keeps the logic readable and easy to trace, but it means every task with a preferred_time iterates through the window list twice. A single-pass approach tracking both a preferred index and a fallback index simultaneously would be more efficient, but was kept separate for clarity. Since the number of windows is small in practice, readability was prioritized over the minor performance gain.
 
 ---
 
