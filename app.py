@@ -18,6 +18,9 @@ if "scheduler" not in st.session_state:
 if "action_msg" not in st.session_state:
     st.session_state.action_msg = None
 
+if "conflicts" not in st.session_state:
+    st.session_state.conflicts = []
+
 
 def fmt_time(military: int) -> str:
     """Convert military time int (e.g. 600) to 12-hour string (e.g. '6:00 AM')."""
@@ -204,14 +207,22 @@ if st.button("Generate schedule"):
         scheduler = Scheduler(st.session_state.owner)
         scheduler.generate_schedule()
         st.session_state.scheduler = scheduler
+        st.session_state.conflicts = scheduler.detect_conflicts()
         st.success("Schedule generated!")
-        for msg in scheduler.detect_conflicts():
-            st.warning(msg)
 
 # Schedule table with sort + filter controls
 if st.session_state.scheduler is not None and st.session_state.owner is not None:
     scheduler = st.session_state.scheduler
     pet_names_all = [p.name for p in st.session_state.owner.get_pets()]
+
+    for msg in st.session_state.conflicts:
+        st.warning(msg)
+
+    pending = scheduler.get_tasks_by_status(completed=False)
+    completed = scheduler.get_tasks_by_status(completed=True)
+    stat_col1, stat_col2 = st.columns(2)
+    stat_col1.metric("Pending", len(pending))
+    stat_col2.metric("Completed", len(completed))
 
     ctrl_col1, ctrl_col2 = st.columns([2, 2])
     with ctrl_col1:
@@ -225,25 +236,16 @@ if st.session_state.scheduler is not None and st.session_state.owner is not None
     else:
         details = scheduler.last_schedule_details
 
-    # Build table rows, applying pet filter
+    # Apply pet filter once
+    if filter_pet != "All pets":
+        allowed = set(id(t) for t in scheduler.get_tasks_for_pet(filter_pet))
+        details = [entry for entry in details if id(entry[1]) in allowed]
+
     def _fmt_mins(start_mins: int) -> str:
         h = start_mins // 60
         m = start_mins % 60
         period = "AM" if h < 12 else "PM"
         return f"{h % 12 or 12}:{m:02d} {period}"
-
-    rows = []
-    for pet, task, start_mins, _ in details:
-        if filter_pet != "All pets" and pet.name != filter_pet:
-            continue
-        rows.append({
-            "Time": _fmt_mins(start_mins),
-            "Pet": pet.name,
-            "Task": task.title,
-            "Duration (min)": task.duration_minutes,
-            "Priority": task.priority,
-            "Frequency": task.frequency,
-        })
 
     # Show action feedback from the previous run (after a "Done" button click + rerun)
     if st.session_state.action_msg:
@@ -263,20 +265,23 @@ if st.session_state.scheduler is not None and st.session_state.owner is not None
         h6.markdown("**Done?**")
         st.divider()
 
-        shown = 0
-        for i, (pet, task, start_mins, _) in enumerate(details):
-            if filter_pet != "All pets" and pet.name != filter_pet:
-                continue
-            shown += 1
+        priority_badge = {"high": "🔴 high", "medium": "🟡 medium", "low": "🟢 low"}
+
+        for i, (pet, task, start_mins) in enumerate(details):
             c1, c2, c3, c4, c5, c6 = st.columns([2, 2, 3, 2, 2, 1])
-            c1.write(_fmt_mins(start_mins))
-            c2.write(pet.name)
-            c3.write(task.title)
-            c4.write(f"{task.duration_minutes} min")
-            c5.write(task.priority)
             if task.completed:
-                c6.write("Done")
+                c1.markdown(f"~~{_fmt_mins(start_mins)}~~")
+                c2.markdown(f"~~{pet.name}~~")
+                c3.markdown(f"~~{task.title}~~")
+                c4.markdown(f"~~{task.duration_minutes} min~~")
+                c5.markdown(f"~~{priority_badge.get(task.priority, task.priority)}~~")
+                c6.write("✅")
             else:
+                c1.write(_fmt_mins(start_mins))
+                c2.write(pet.name)
+                c3.write(task.title)
+                c4.write(f"{task.duration_minutes} min")
+                c5.write(priority_badge.get(task.priority, task.priority))
                 if c6.button("Done", key=f"done_{i}_{task.title}_{pet.name}"):
                     next_task = scheduler.mark_task_complete(pet, task)
                     if next_task:
@@ -286,8 +291,6 @@ if st.session_state.scheduler is not None and st.session_state.owner is not None
                         )
                     else:
                         st.session_state.action_msg = f"'{task.title}' marked complete."
-                    scheduler.generate_schedule()
+                    st.session_state.conflicts = scheduler.detect_conflicts()
                     st.rerun()
 
-        if shown == 0:
-            st.info("No tasks match the current filter.")

@@ -55,17 +55,6 @@ def test_high_priority_task_scheduled_first():
     assert result[0].title == "High Task", "High priority task should be scheduled first"
 
 
-def test_preferred_time_morning_goes_in_morning_window():
-    """Preferred time: a morning task should land in the morning window, not afternoon."""
-    # Two windows: morning (6-9 AM) and afternoon (1-5 PM)
-    task = Task(title="Walk", duration_minutes=30, priority="medium", preferred_time="morning")
-    scheduler = _make_scheduler([(600, 900), (1300, 1700)], [task])
-    scheduler.generate_schedule()
-    # Check that preferred_met is True (task placed in morning window)
-    _, _, start_mins, preferred_met = scheduler.last_schedule_details[0]
-    assert preferred_met is True, "Task with preferred_time='morning' should land in morning window"
-    assert start_mins < 720, "Morning task should start before noon (720 minutes)"
-
 
 # ------------------------------------------------------------------
 # Recurring task tests
@@ -164,7 +153,7 @@ def test_filter_tasks_by_status():
 # ------------------------------------------------------------------
 
 def test_mark_task_complete_creates_next_daily_occurrence():
-    """Recurring: completing a daily task should create a new task due tomorrow."""
+    """Recurring: completing a daily task should advance due_date by 1 day in-place."""
     task = Task(title="Daily Feed", duration_minutes=10, priority="high", frequency="daily")
     scheduler = _make_scheduler([(600, 800)], [task])
     scheduler.generate_schedule()
@@ -172,15 +161,17 @@ def test_mark_task_complete_creates_next_daily_occurrence():
     pet = scheduler.owner.get_pets()[0]
     next_task = scheduler.mark_task_complete(pet, task)
 
-    assert next_task is not None, "Daily task completion should return a next occurrence"
+    assert next_task is not None, "Daily task completion should return the updated task"
     assert next_task.due_date == datetime.date.today() + datetime.timedelta(days=1)
     assert next_task.title == task.title
     assert next_task.frequency == "daily"
-    assert next_task.completed is False, "Next occurrence should start as not completed"
+    # The returned task is the same object (now marked complete); the due_date
+    # advances so generate_schedule will re-include it tomorrow.
+    assert next_task is task, "mark_task_complete should return the same task object, not a clone"
 
 
 def test_mark_task_complete_creates_next_weekly_occurrence():
-    """Recurring: completing a weekly task should create a new task due in 7 days."""
+    """Recurring: completing a weekly task should advance due_date by 7 days in-place."""
     today = datetime.date.today()
     task = Task(
         title="Weekly Bath",
@@ -195,20 +186,22 @@ def test_mark_task_complete_creates_next_weekly_occurrence():
     pet = scheduler.owner.get_pets()[0]
     next_task = scheduler.mark_task_complete(pet, task)
 
-    assert next_task is not None, "Weekly task completion should return a next occurrence"
+    assert next_task is task, "Weekly task completion should return the same task object"
     assert next_task.due_date == today + datetime.timedelta(weeks=1)
 
 
 def test_mark_task_complete_returns_none_for_once_task():
-    """Recurring: completing a one-time task should return None (no next occurrence)."""
+    """Recurring: completing a one-time task should return None and remove it from the pet."""
     task = Task(title="Vet Visit", duration_minutes=60, priority="high", frequency="once")
     scheduler = _make_scheduler([(600, 900)], [task])
     scheduler.generate_schedule()
 
     pet = scheduler.owner.get_pets()[0]
+    assert len(pet.get_tasks()) == 1, "Pet should have 1 task before completion"
     result = scheduler.mark_task_complete(pet, task)
 
     assert result is None, "One-time task should not produce a next occurrence"
+    assert len(pet.get_tasks()) == 0, "One-time task should be removed from pet after completion"
 
 
 def test_no_overlap_in_normal_schedule():
@@ -239,8 +232,8 @@ def test_overlap_detected_when_tasks_share_same_start_time():
     START = 360  # 6:00 AM in minutes
     scheduler.last_schedule = [walk, feed]
     scheduler.last_schedule_details = [
-        (pet, walk, START, True),
-        (pet, feed, START, True),
+        (pet, walk, START),
+        (pet, feed, START),
     ]
     scheduler._unscheduled = []
 
@@ -264,8 +257,8 @@ def test_overlap_detected_for_partial_overlap():
     # Task A: 6:00-6:40 AM, Task B: 6:20-6:50 AM -> partial overlap at 6:20-6:40
     scheduler.last_schedule = [task_a, task_b]
     scheduler.last_schedule_details = [
-        (pet, task_a, 360, True),  # 6:00 AM
-        (pet, task_b, 380, True),  # 6:20 AM
+        (pet, task_a, 360),  # 6:00 AM
+        (pet, task_b, 380),  # 6:20 AM
     ]
     scheduler._unscheduled = []
 
@@ -310,7 +303,7 @@ def test_sort_by_time_returns_chronological_order():
     scheduler.generate_schedule()
     sorted_details = scheduler.sort_by_time()
 
-    start_times = [start for _, _, start, _ in sorted_details]
+    start_times = [start for _, _, start in sorted_details]
     assert start_times == sorted(start_times), \
         "sort_by_time() should return tasks in ascending start-time order"
 
@@ -331,14 +324,14 @@ def test_sort_by_time_with_manually_reversed_details():
     # Inject details in reverse chronological order to confirm sort_by_time fixes it
     scheduler.last_schedule = [task_c, task_b, task_a]
     scheduler.last_schedule_details = [
-        (pet, task_c, 500, True),  # latest start
-        (pet, task_b, 400, True),
-        (pet, task_a, 360, True),  # earliest start
+        (pet, task_c, 500),  # latest start
+        (pet, task_b, 400),
+        (pet, task_a, 360),  # earliest start
     ]
     scheduler._unscheduled = []
 
     sorted_details = scheduler.sort_by_time()
-    start_times = [start for _, _, start, _ in sorted_details]
+    start_times = [start for _, _, start in sorted_details]
     assert start_times == [360, 400, 500], \
         "sort_by_time() should reorder reversed details into ascending start-time order"
 
@@ -350,9 +343,9 @@ def test_sort_by_time_across_two_windows():
     pet = Pet(name="Milo", species="cat", age=1)
     owner.add_pet(pet)
     # Three tasks that will fill both windows
-    t1 = Task(title="Morning Feed", duration_minutes=30, priority="high",   preferred_time="morning")
-    t2 = Task(title="Afternoon Walk", duration_minutes=30, priority="medium", preferred_time="afternoon")
-    t3 = Task(title="Afternoon Play", duration_minutes=30, priority="low",   preferred_time="afternoon")
+    t1 = Task(title="Morning Feed", duration_minutes=30, priority="high")
+    t2 = Task(title="Afternoon Walk", duration_minutes=30, priority="medium")
+    t3 = Task(title="Afternoon Play", duration_minutes=30, priority="low")
     pet.add_task(t1)
     pet.add_task(t2)
     pet.add_task(t3)
@@ -361,7 +354,7 @@ def test_sort_by_time_across_two_windows():
     scheduler.generate_schedule()
     sorted_details = scheduler.sort_by_time()
 
-    start_times = [start for _, _, start, _ in sorted_details]
+    start_times = [start for _, _, start in sorted_details]
     assert start_times == sorted(start_times), \
         "sort_by_time() should return tasks from all windows in chronological order"
 

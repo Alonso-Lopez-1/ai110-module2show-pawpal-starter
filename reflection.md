@@ -44,12 +44,13 @@ The scheduler uses a two-pass linear scan over time windows for each task — fi
 
 - How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
 - What kinds of prompts or questions were most helpful?
+I used AI for design brainstorming and debugging. For the design, I prompted for a UML class diagram based on the requirements, and for debugging I asked for explanations regarding logical errors in the output. The most helpful prompts were the ones that I used to ask for specific code snippets and explanations on handling edge cases and logical errors. For example, I asked for a walkthrough of the scheduling algorithm and also the reasons why certain tasks were not being scheduled as expected.
 
 **b. Judgment and verification**
 
 - Describe one moment where you did not accept an AI suggestion as-is.
 - How did you evaluate or verify what the AI suggested?
-
+I did not accept the AI suggestion to reappend daily or weekly tasks after marking them complete. I evaluated this by considering the user experience and testing out the behavior in the app. I realized that the task table would become cluttered and confusing if the same tasks kept reappearing.
 ---
 
 ## 4. Testing and Verification
@@ -58,12 +59,13 @@ The scheduler uses a two-pass linear scan over time windows for each task — fi
 
 - What behaviors did you test?
 - Why were these tests important?
+I tested the scheduling logic and task management behaviors. These tests were important to ensure that the main functionality was working correctly. I also tested edge cases such as overlapping time windows to verify that the system handled these scenarios.
 
 **b. Confidence**
 
 - How confident are you that your scheduler works correctly?
 - What edge cases would you test next if you had more time?
-
+I am fairly confident that the scheduler works correctly for the main use cases. If I had more time, I would brainstorm more edge cases and UI interactions that could make the app more robust and user-friendly. 
 ---
 
 ## 5. Reflection
@@ -71,11 +73,14 @@ The scheduler uses a two-pass linear scan over time windows for each task — fi
 **a. What went well**
 
 - What part of this project are you most satisfied with?
+I am satisfied with the design and pace in which I was able to implement core functionalities. I gained a bit more intuition with regards to using AI as a companion for design and debugging. 
 
 **b. What you would improve**
 
 - If you had another iteration, what would you improve or redesign?
+I would improve the UI to make it more appealing and intuitive for more novice users. I feel that there might be better ways to visually communicate some information to the users. 
 
 **c. Key takeaway**
 
 - What is one important thing you learned about designing systems or working with AI on this project?
+One important thing that I learned is that AI can be a powerful tool, but it is best to guide it in certain direction using your own judgment and intuition rather than letting it guide you entirely. 

@@ -1,6 +1,3 @@
-# PawPal+ Class Diagram
-
-```mermaid
 classDiagram
     class Owner {
         +name: string
@@ -59,16 +56,3 @@ classDiagram
     Scheduler "1" --> "1" Owner : schedules for
     Scheduler ..> Helpers : uses
     Owner ..> Helpers : uses
-```
-
-## Class Descriptions
-
-**Owner**: Stores the owner's name, normalized/merged availability windows, and registered pets.
-
-**Pet**: Holds pet attributes and an ordered list of care tasks, capped at `max_tasks` (default 15). `add_task()` validates title, duration, and priority before appending.
-
-**Task**: Models one care item. `frequency` (`"once"` / `"daily"` / `"weekly"`) and `due_date` drive recurring scheduling; `days_of_week` restricts weekly tasks to specific days.
-
-**Scheduler**: Takes an `Owner` (not a bare pet) and generates an optimized schedule across all pets. Tracks scheduled details as `(Pet, Task, start_mins)` tuples and unscheduled overflow separately. Provides filtering, sorting, conflict detection, and recurring-task completion helpers.
-
-**Helpers** (module-level functions): `_normalize_windows` merges overlapping time windows (called by `Owner.__init__`); `_mins_to_time` converts integer minutes to a 12-hour clock string (used in conflict messages).

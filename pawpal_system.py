@@ -52,7 +52,6 @@ class Task:
     title: str
     duration_minutes: int
     priority: str  # "low", "medium", "high"
-    preferred_time: Optional[str] = None  # "morning", "afternoon", "evening"
     frequency: str = "once"  # "once", "daily", "weekly"
     completed: bool = False
     days_of_week: List[str] = field(default_factory=list)  # for weekly: e.g. ["Mon", "Wed"]
@@ -69,8 +68,7 @@ class Task:
     def __str__(self) -> str:
         """Return a readable summary of the task"""
         priority_label = self.priority.capitalize() if self.priority else "Unknown"
-        when = f" ({self.preferred_time})" if self.preferred_time else ""
-        return f"{self.title}: {self.duration_minutes} min, {priority_label}{when}"
+        return f"{self.title}: {self.duration_minutes} min, {priority_label}"
 
 
 @dataclass
@@ -135,15 +133,6 @@ class Owner:
 class Scheduler:
     """The scheduling brain - generates daily pet care plans across multiple pets"""
 
-    # Maps preferred_time strings to (start_minute, end_minute) ranges
-    _PREFERRED_RANGES = {
-        "morning": (0, 720),      # 12:00 AM – 12:00 PM
-        "afternoon": (720, 1080), # 12:00 PM –  6:00 PM
-        "evening": (1080, 1440),  #  6:00 PM – 12:00 AM
-    }
-    # Sort order for preferred_time (chronological, not alphabetical)
-    _PREFERRED_ORDER = {"morning": 0, "afternoon": 1, "evening": 2}
-
     def __init__(self, owner: Owner):
         """
         Initialize a scheduler for an owner with multiple pets
@@ -152,7 +141,7 @@ class Scheduler:
             owner: The Owner whose pets' tasks will be scheduled
         """
         self.owner = owner
-        # last_schedule_details: list of (Pet, Task, start_mins: int, preferred_met: bool)
+        # last_schedule_details: list of (Pet, Task, start_mins: int)
         self.last_schedule: List[Task] = []
         self.last_schedule_details: List[Tuple] = []
         self._unscheduled: List[Tuple] = []  # (Pet, Task) pairs that didn't fit
@@ -181,30 +170,13 @@ class Scheduler:
             minutes.append(end_mins - start_mins)
         return minutes
 
-    def _window_overlaps_preferred(self, window_start_mins: int, window_end_mins: int,
-                                   preferred_time: str) -> bool:
-        """Check whether a time window overlaps with a preferred_time range.
-
-        Args:
-            window_start_mins: Window start in minutes from midnight
-            window_end_mins: Window end in minutes from midnight
-            preferred_time: "morning", "afternoon", or "evening"
-
-        Returns:
-            True if the window overlaps the preferred time range
-        """
-        pref_start, pref_end = self._PREFERRED_RANGES.get(preferred_time.lower(), (0, 1440))
-        return window_start_mins < pref_end and window_end_mins > pref_start
-
     def generate_schedule(self) -> List[Task]:
         """
         Generate an optimized daily schedule based on constraints and priorities.
 
         Improvements over the original:
-        - Respects preferred_time by trying preferred windows first
         - Handles recurring tasks: daily tasks always appear; weekly tasks only on matching days
         - Tracks tasks that couldn't be scheduled (instead of silently dropping them)
-        - Sorts preferred_time chronologically (morning → afternoon → evening)
 
         Returns:
             An ordered list of tasks scheduled for the day
@@ -225,7 +197,7 @@ class Scheduler:
                 if freq == "daily":
                     pass  # always include, even if marked complete
                 elif freq == "weekly":
-                    if today_weekday not in task.days_of_week:
+                    if task.days_of_week and today_weekday not in task.days_of_week:
                         continue  # not scheduled on today's weekday
                 else:
                     # "once" or any unknown frequency: skip if already done
@@ -235,12 +207,11 @@ class Scheduler:
 
         priority_rank = {"high": 3, "medium": 2, "low": 1}
 
-        # --- Sort: high priority → preferred time (chronological) → shorter duration ---
+        # --- Sort: high priority → shorter duration ---
         task_pet_pairs_sorted = sorted(
             task_pet_pairs,
             key=lambda tp: (
                 -priority_rank.get(tp[1].priority.lower(), 0),
-                self._PREFERRED_ORDER.get(tp[1].preferred_time or "", 3),
                 tp[1].duration_minutes,
             ),
         )
@@ -248,9 +219,7 @@ class Scheduler:
         # --- Build per-window tracking structures ---
         windows = self.owner.available_time_windows
         remaining_minutes = self._window_minutes()
-        window_start_mins = [(s // 100) * 60 + (s % 100) for s, _ in windows]
-        window_end_mins = [(e // 100) * 60 + (e % 100) for _, e in windows]
-        window_current_times = list(window_start_mins)
+        window_current_times = [(s // 100) * 60 + (s % 100) for s, _ in windows]
 
         scheduled_tasks: List[Task] = []
         scheduled_details: List[Tuple] = []
@@ -260,31 +229,14 @@ class Scheduler:
             requirement = task.duration_minutes
             placed = False
 
-            # Pass 1: try to place in a window that matches the preferred time
-            if task.preferred_time:
-                for i in range(len(windows)):
-                    if requirement <= remaining_minutes[i]:
-                        if self._window_overlaps_preferred(
-                            window_start_mins[i], window_end_mins[i], task.preferred_time
-                        ):
-                            scheduled_details.append((pet, task, window_current_times[i], True))
-                            scheduled_tasks.append(task)
-                            remaining_minutes[i] -= requirement
-                            window_current_times[i] += requirement
-                            placed = True
-                            break
-
-            # Pass 2 (fallback): any window with enough time
-            if not placed:
-                for i in range(len(windows)):
-                    if requirement <= remaining_minutes[i]:
-                        preferred_met = task.preferred_time is None  # no pref = always "met"
-                        scheduled_details.append((pet, task, window_current_times[i], preferred_met))
-                        scheduled_tasks.append(task)
-                        remaining_minutes[i] -= requirement
-                        window_current_times[i] += requirement
-                        placed = True
-                        break
+            for i in range(len(windows)):
+                if requirement <= remaining_minutes[i]:
+                    scheduled_details.append((pet, task, window_current_times[i]))
+                    scheduled_tasks.append(task)
+                    remaining_minutes[i] -= requirement
+                    window_current_times[i] += requirement
+                    placed = True
+                    break
 
             if not placed:
                 unscheduled.append((pet, task))
@@ -302,11 +254,11 @@ class Scheduler:
         """Return scheduled task details sorted by start time (earliest first).
 
         Uses a lambda as the sort key to extract the start_mins value from each
-        (Pet, Task, start_mins, preferred_met) tuple — the same technique as
+        (Pet, Task, start_mins) tuple — the same technique as
         Python's sorted() with a key function.
 
         Returns:
-            List of (Pet, Task, start_mins, preferred_met) sorted by start_mins
+            List of (Pet, Task, start_mins) sorted by start_mins
         """
         return sorted(self.last_schedule_details, key=lambda entry: entry[2])
 
@@ -345,7 +297,12 @@ class Scheduler:
     # ------------------------------------------------------------------
 
     def mark_task_complete(self, pet: "Pet", task: Task) -> Optional[Task]:
-        """Mark a task complete and auto-schedule its next occurrence if recurring.
+        """Mark a task complete and queue its next occurrence if recurring.
+
+        For recurring tasks (daily/weekly), the existing task object is updated
+        in-place: due_date advances to the next occurrence so the pet's task list
+        stays the same length.  For one-time tasks the task is removed from the
+        pet's list so it no longer appears in the Tasks table.
 
         Uses timedelta to calculate the next due date:
           - daily  → today + timedelta(days=1)
@@ -356,7 +313,7 @@ class Scheduler:
             task: The Task to mark complete
 
         Returns:
-            The newly created next-occurrence Task, or None for one-time tasks
+            The updated Task (same object) for recurring tasks, or None for once tasks
         """
         task.mark_complete()
 
@@ -364,23 +321,16 @@ class Scheduler:
         freq = task.frequency.lower()
 
         if freq == "daily":
-            next_due = today + datetime.timedelta(days=1)
+            task.due_date = today + datetime.timedelta(days=1)
+            return task
         elif freq == "weekly":
-            next_due = today + datetime.timedelta(weeks=1)
+            task.due_date = today + datetime.timedelta(weeks=1)
+            return task
         else:
-            return None  # "once" tasks have no next occurrence
-
-        next_task = Task(
-            title=task.title,
-            duration_minutes=task.duration_minutes,
-            priority=task.priority,
-            preferred_time=task.preferred_time,
-            frequency=task.frequency,
-            days_of_week=list(task.days_of_week),
-            due_date=next_due,
-        )
-        pet.add_task(next_task)
-        return next_task
+            # "once" task: remove from the pet's list so it leaves the Tasks table
+            if task in pet.tasks:
+                pet.tasks.remove(task)
+            return None
 
     # ------------------------------------------------------------------
     # Conflict detection
@@ -391,7 +341,6 @@ class Scheduler:
 
         Checks for:
         - Tasks that couldn't be scheduled at all (no available time)
-        - Tasks placed outside their preferred time slot (fallback used)
         - Total task duration exceeding total available window time
 
         Returns:
@@ -418,23 +367,15 @@ class Scheduler:
                 f"could not be scheduled — no window had enough remaining time."
             )
 
-        # Per-task: placed outside preferred time
-        for pet, task, start_mins, preferred_met in self.last_schedule_details:
-            if task.preferred_time and not preferred_met:
-                conflicts.append(
-                    f"'{task.title}' for {pet.name} was placed at {_mins_to_time(start_mins)} "
-                    f"(preferred: {task.preferred_time}) - no matching window was available."
-                )
-
         # Overlap detection: check every pair of scheduled tasks for overlapping time ranges.
         # Strategy: for tasks A and B, overlap exists when start_A < end_B AND start_B < end_A.
         # This is O(n^2) but n is small (bounded by max tasks per pet), so it stays lightweight.
         details = self.last_schedule_details
         for i in range(len(details)):
-            pet_a, task_a, start_a, _ = details[i]
+            pet_a, task_a, start_a = details[i]
             end_a = start_a + task_a.duration_minutes
             for j in range(i + 1, len(details)):
-                pet_b, task_b, start_b, _ = details[j]
+                pet_b, task_b, start_b = details[j]
                 end_b = start_b + task_b.duration_minutes
                 if start_a < end_b and start_b < end_a:
                     conflicts.append(
@@ -446,37 +387,3 @@ class Scheduler:
 
         return conflicts
 
-    # ------------------------------------------------------------------
-    # Explanation
-    # ------------------------------------------------------------------
-
-    def explain_schedule(self) -> str:
-        """
-        Explain the reasoning behind the generated schedule.
-
-        Returns:
-            A string explanation of why tasks were included/ordered
-        """
-        if not self.last_schedule:
-            return (
-                "No tasks were scheduled. Either there are no tasks, "
-                "all tasks are marked complete, or there is not enough available time."
-            )
-
-        lines = [f"Scheduled tasks for {self.owner.name}'s pets (in priority order):"]
-        for pet, task, start_mins, preferred_met in self.last_schedule_details:
-            hours = start_mins // 60
-            mins = start_mins % 60
-            period = "AM" if hours < 12 else "PM"
-            display_hour = hours % 12 or 12
-            time_str = f"{display_hour}:{mins:02d} {period}"
-            pref_note = ""
-            if task.preferred_time:
-                pref_note = " [preferred slot]" if preferred_met else f" [fallback from {task.preferred_time}]"
-            lines.append(
-                f"- [{pet.name}] {task.title} @ {time_str} "
-                f"(priority={task.priority}, frequency={task.frequency}, "
-                f"duration={task.duration_minutes} min{pref_note})"
-            )
-
-        return "\n".join(lines)
