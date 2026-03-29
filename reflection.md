@@ -10,13 +10,17 @@ Three core actions that should be available to the user are:
 - Add a pet to the system
 - Create a task for a pet
 - Generate the schedule for a pet
+The initial UML design centers on four classes: Owner, Pet, Task, and Scheduler.
+Owner stores the pet owner’s name, availability windows, and registered pets. Pet holds pet details (name/species/age) and has task management methods. Task models an individual care item (title, duration, priority, optional preferred time) with helper methods for priority and display. Scheduler is the “brain” that takes a pet and available time windows, then produces an ordered schedule and an explanation for why tasks were included and arranged.
 
 **b. Design changes**
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
 
----
+---Yes, I added a limit to the amount of tasks available as it was 
+hypothetically possible to add unlimited tasks for a pet. I also 
+added some checks for the scheduling so that there were no overlapping time windows and only adding tasks that fit within the time windows. These were refinements to handle potential bottlenecks identified by AI, without changing the core class structure or responsibilities from the initial UML design.
 
 ## 2. Scheduling Logic and Tradeoffs
 
